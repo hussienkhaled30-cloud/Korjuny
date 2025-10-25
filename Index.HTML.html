@@ -1,0 +1,1137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <!-- Responsive viewport and safe-area for devices with notches -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <!-- Browser UI theming and mobile-web-app support -->
+    <meta name="theme-color" content="#0284c7">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <title>Korjuny (Catumaxomab) | Interactive Clinical Report</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Chosen Palette: Clinical Blue, White, and Slate -->
+    <!-- Application Structure Plan: A single-page application with a persistent left-sidebar navigation (collapses to a top-header on mobile). This allows users (clinicians) to non-linearly access specific information (e.g., Dosing, Safety, Efficacy) on demand, which is more user-friendly than a linear slide deck. The main content area dynamically displays the selected section, using tabs and charts for clarity and data visualization. -->
+    <!-- Visualization & Content Choices:
+        - Report: PuFS Data (46 vs 11) -> Goal: Compare -> Viz: Line Chart (Chart.js) -> Interaction: Tooltip -> Justification: Standard for survival data.
+        - Report: TTPu Data (77 vs 13) -> Goal: Compare -> Viz: Bar Chart (Chart.js) -> Interaction: Tooltip -> Justification: Clear comparison of two values.
+        - Report: MoA Diagram -> Goal: Organize/Inform -> Viz: HTML/CSS Diagram (Flexbox/Grid) -> Interaction: Static diagram with clear labels -> Justification: Avoids SVG, clear information hierarchy.
+        - Report: Safety AEs -> Goal: Organize -> Viz: HTML Tables + JS Tabs -> Interaction: Click tabs -> Justification: Condenses dense data.
+        - Report: Dosing Schedule -> Goal: Inform -> Viz: HTML/CSS Timeline -> Interaction: Static -> Justification: Clear visual flow.
+        - Report: OS by ADA -> Goal: Compare -> Viz: Line Chart (Chart.js) -> Interaction: Tooltip -> Justification: Standard for survival data.
+        -->
+    <!-- CONFIRMATION: NO SVG graphics used. NO Mermaid JS used. -->
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+        }
+        /* Mobile-friendly defaults */
+        /* Respect safe-area insets on iOS devices with notches */
+        body {
+            padding-left: env(safe-area-inset-left, 0.5rem);
+            padding-right: env(safe-area-inset-right, 0.5rem);
+            padding-top: env(safe-area-inset-top, 0.5rem);
+            padding-bottom: env(safe-area-inset-bottom, 0.5rem);
+            -webkit-tap-highlight-color: rgba(0,0,0,0);
+            touch-action: manipulation;
+        }
+
+        /* Make media and iframes flexible */
+        img, picture, video, svg, iframe {
+            max-width: 100%;
+            height: auto;
+            display: block;
+        }
+
+        /* Ensure tables don't overflow on small screens */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        /* Larger, touch-friendly tappable areas */
+        .nav-link, button {
+            min-height: 44px;
+            padding-top: 0.5rem;
+            padding-bottom: 0.5rem;
+        }
+        .chart-container {
+            position: relative;
+            width: 100%;
+            max-width: 600px;
+            margin-left: auto;
+            margin-right: auto;
+            height: 300px;
+            max-height: 400px;
+        }
+        @media (min-width: 768px) {
+            .chart-container {
+                height: 350px;
+            }
+        }
+        .nav-link {
+            transition: background-color 0.2s, color 0.2s;
+        }
+        .nav-link.active {
+            background-color: #0284c7;
+            color: white;
+            font-weight: 600;
+        }
+        .nav-link:hover:not(.active) {
+            background-color: #f0f9ff;
+        }
+        .tab-link {
+            transition: background-color 0.2s, border-color 0.2s;
+        }
+        .tab-link.active {
+            border-color: #0284c7;
+            background-color: #f0f9ff;
+        }
+        .content-section {
+            display: none;
+        }
+        .content-section.active {
+            display: block;
+        }
+        .tab-content {
+            display: none;
+        }
+        .tab-content.active {
+            display: block;
+        }
+        .moa-diagram {
+            display: grid;
+            grid-template-areas:
+                ". t-cell ."
+                "tumor-cell antibody accessory-cell"
+                ". . .";
+            align-items: center;
+            justify-content: center;
+            gap: 1rem;
+            position: relative;
+            padding: 2rem;
+            min-height: 350px;
+        }
+        .moa-cell {
+            border: 2px solid;
+            border-radius: 0.5rem;
+            padding: 1.5rem 1rem;
+            text-align: center;
+            font-weight: 600;
+            min-width: 150px;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            position: relative;
+            background-color: white;
+            z-index: 10;
+        }
+        .moa-cell-tumor { grid-area: tumor-cell; border-color: #ef4444; color: #ef4444; }
+        .moa-cell-tcell { grid-area: t-cell; border-color: #3b82f6; color: #3b82f6; }
+        .moa-cell-accessory { grid-area: accessory-cell; border-color: #16a34a; color: #16a34a; }
+        .moa-antibody {
+            grid-area: antibody;
+            text-align: center;
+            position: relative;
+            z-index: 5;
+        }
+        .moa-antibody-core {
+            width: 80px;
+            height: 80px;
+            border-radius: 9999px;
+            background-color: #0284c7;
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 0.875rem;
+            line-height: 1.25rem;
+            margin: 0 auto;
+            z-index: 20;
+            position: relative;
+            border: 4px solid white;
+            box-shadow: 0 0 0 2px #0284c7;
+        }
+        .moa-line {
+            position: absolute;
+            background-color: #94a3b8;
+            z-index: 1;
+        }
+        .line-tumor {
+            width: calc(50% - 40px); left: 0; top: 50%; height: 3px; transform: translateY(-50%);
+        }
+        .line-tcell {
+            height: calc(50% - 40px); top: 0; left: 50%; width: 3px; transform: translateX(-50%);
+        }
+        .line-accessory {
+            width: calc(50% - 40px); right: 0; top: 50%; height: 3px; transform: translateY(-50%);
+        }
+
+        @media (max-width: 640px) {
+            .moa-diagram {
+                grid-template-areas:
+                    "t-cell"
+                    "antibody"
+                    "tumor-cell"
+                    "accessory-cell";
+                gap: 1.5rem;
+            }
+            .moa-line { display: none; }
+        }
+
+        /* Force desktop mode when user requests 'full site' on mobile/webview */
+        body.force-desktop {
+            width: 1024px; /* simulates desktop viewport */
+            max-width: 100%;
+            overflow-x: auto;
+        }
+        /* Show the desktop aside and hide the mobile header when forced */
+        #main-aside.force-desktop-shown, body.force-desktop #main-aside {
+            display: flex !important;
+            position: relative !important;
+            height: auto !important;
+        }
+        body.force-desktop #mobile-header {
+            display: none !important;
+        }
+        /* Ensure the main content doesn't get hidden under the forced layout */
+        body.force-desktop main {
+            padding-left: 1rem !important;
+            padding-right: 1rem !important;
+        }
+
+        .timeline {
+            display: flex;
+            flex-direction: column;
+            position: relative;
+        }
+        .timeline::before {
+            content: '';
+            position: absolute;
+            top: 1.25rem;
+            bottom: 1.25rem;
+            left: 1.25rem;
+            width: 4px;
+            background-color: #e0f2fe;
+            border-radius: 2px;
+        }
+        .timeline-item {
+            display: flex;
+            align-items: flex-start;
+            margin-bottom: 2rem;
+            position: relative;
+        }
+        .timeline-dot {
+            flex-shrink: 0;
+            width: 2.75rem;
+            height: 2.75rem;
+            border-radius: 9999px;
+            background-color: #0284c7;
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            border: 4px solid #e0f2fe;
+            z-index: 10;
+        }
+        .timeline-content {
+            margin-left: 1.5rem;
+            padding: 1rem;
+            background-color: #f0f9ff;
+            border-radius: 0.5rem;
+            width: 100%;
+        }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800">
+
+    <div class="flex flex-col md:flex-row min-h-screen">
+        
+    <header id="mobile-header" class="md:hidden sticky top-0 bg-white shadow-md z-30">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div class="flex justify-between items-center h-16">
+                    <h1 class="text-xl font-bold text-sky-700">Korjuny (Catumaxomab)</h1>
+                    <div class="flex items-center gap-2">
+                        <button id="mobile-menu-btn" class="inline-flex items-center justify-center p-2 rounded-md text-slate-400 hover:text-slate-500 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-sky-500">
+                        <span class="sr-only">Open main menu</span>
+                        <svg class="block h-6 w-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" aria-hidden="true">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+                        </svg>
+                        </button>
+                        <!-- Toggle full/desktop view for mobile/webviews -->
+                        <button id="view-full-btn" title="View full site" class="inline-flex items-center justify-center px-3 py-2 rounded-md text-slate-600 bg-slate-50 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-sky-500">
+                            <span class="text-sm font-medium">Full site</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <nav id="mobile-menu" class="hidden md:hidden border-t border-slate-200">
+                <ul class="flex flex-col p-2 space-y-1">
+                </ul>
+            </nav>
+        </header>
+
+    <aside id="main-aside" class="hidden md:flex md:flex-col md:w-64 bg-white shadow-lg sticky top-0 h-screen z-20">
+            <div class="flex items-center justify-center h-16 shadow-sm">
+                <h1 class="text-xl font-bold text-sky-700 px-4 text-center">Korjuny (Catumaxomab)</h1>
+            </div>
+            <nav class="flex-1 overflow-y-auto">
+                <ul id="desktop-nav-list" class="flex flex-col p-4 space-y-1">
+                </ul>
+            </nav>
+        </aside>
+
+        <main class="flex-1 p-6 md:p-10">
+            
+            <section id="section-overview" class="content-section active space-y-8">
+                <header class="pb-4 border-b border-slate-200">
+                    <h2 class="text-3xl font-bold text-sky-800">A New Standard for Malignant Ascites (MA)</h2>
+                    <p class="mt-2 text-lg text-slate-600">Executive summary of Korjuny (catumaxomab), a first-in-class, trifunctional antibody for the intraperitoneal treatment of MA in patients with EpCAM-positive carcinomas.</p>
+                </header>
+
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div class="bg-white p-6 rounded-lg shadow-md border-l-4 border-sky-600">
+                        <h3 class="text-lg font-semibold text-sky-700">Pivotal Efficacy</h3>
+                        <p class="text-3xl font-bold text-slate-900 mt-2">4x Improvement</p>
+                        <p class="text-slate-600 mt-1">In Puncture-Free Survival (PuFS) vs. Standard of Care.</p>
+                    </div>
+                    <div class="bg-white p-6 rounded-lg shadow-md border-l-4 border-green-600">
+                        <h3 class="text-lg font-semibold text-green-700">Primary Endpoint</h3>
+                        <p class="text-3xl font-bold text-slate-900 mt-2">46 vs 11 Days</p>
+                        <p class="text-slate-600 mt-1">Median PuFS (Catumaxomab vs. Control). HR = 0.254, p &lt; 0.0001.</p>
+                    </div>
+                    <div class="bg-white p-6 rounded-lg shadow-md border-l-4 border-purple-600">
+                        <h3 class="text-lg font-semibold text-purple-700">Manageable Safety</h3>
+                        <p class="text-3xl font-bold text-slate-900 mt-2">Predictable Profile</p>
+                        <p class="text-slate-600 mt-1">On-target, immune-related AEs (e.g., CRS) managed with prophylaxis.</p>
+                    </div>
+                </div>
+
+                <div>
+                    <h3 class="text-2xl font-semibold text-slate-800 mb-4">The Clinical Challenge</h3>
+                    <p class="text-slate-600 leading-relaxed">
+                        Malignant Ascites is a severe complication of advanced EpCAM-positive cancers (ovarian, gastric, etc.) with a poor prognosis (median survival 1-4 months). The current standard of care is serial, palliative Large-Volume Paracentesis (LVP), which only provides temporary relief and carries risks of infection, hypotension, and significant protein loss. Patients are trapped in a palliative loop, highlighting a critical unmet need for a therapy that targets the underlying cause of fluid accumulation.
+                    </p>
+                </div>
+            </section>
+
+            <section id="section-problem" class="content-section space-y-8">
+                <header class="pb-4 border-b border-slate-200">
+                    <h2 class="text-3xl font-bold text-sky-800">The Clinical Problem</h2>
+                    <p class="mt-2 text-lg text-slate-600">Understanding the landscape of malignant ascites and the significant unmet therapeutic need.</p>
+                </header>
+
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                    <div class="bg-white p-6 rounded-lg shadow">
+                        <h3 class="text-2xl font-semibold text-slate-800 mb-4">The Palliative Loop</h3>
+                        <p class="text-slate-600 mb-4">Current Standard of Care (SoC) is limited to serial LVP, which is purely symptomatic, invasive, and non-durable. It does not treat the tumor or slow fluid production.</p>
+                        <div class="space-y-4">
+                            <div class="flex items-center p-4 bg-slate-50 rounded-md">
+                                <span class="text-3xl mr-4">🔄</span>
+                                <div>
+                                    <h4 class="font-semibold text-slate-700">Rapid Fluid Accumulation</h4>
+                                    <p class="text-sm text-slate-500">Causes severe distension, pain, and dyspnea.</p>
+                                </div>
+                            </div>
+                            <div class="flex items-center p-4 bg-slate-50 rounded-md">
+                                <span class="text-3xl mr-4">💉</span>
+                                <div>
+                                    <h4 class="font-semibold text-slate-700">Large-Volume Paracentesis (LVP)</h4>
+                                    <p class="text-sm text-slate-500">Provides temporary relief but risks infection/protein loss.</p>
+                                </div>
+                            </div>
+                            <div class="flex items-center p-4 bg-slate-50 rounded-md">
+                                <span class="text-3xl mr-4">🔁</span>
+                                <div>
+                                    <h4 class="font-semibold text-slate-700">Cycle Repeats</h4>
+                                    <p class="text-sm text-slate-500">Fluid returns, requiring another LVP, decreasing quality of life.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="bg-white p-6 rounded-lg shadow">
+                        <h3 class="text-2xl font-semibold text-slate-800 mb-4">The Unmet Need</h3>
+                        <p class="text-slate-600 mb-4">Existing therapies fail to provide durable, targeted control of MA.</p>
+                        <ul class="space-y-3">
+                            <li class="flex items-start">
+                                <span class="text-red-500 font-bold text-xl mr-3">✕</span>
+                                <div>
+                                    <h4 class="font-semibold text-slate-700">Systemic Chemotherapy</h4>
+                                    <p class="text-sm text-slate-500">Poor penetration and low drug concentration in the peritoneum.</p>
+                                </div>
+                            </li>
+                            <li class="flex items-start">
+                                <span class="text-red-500 font-bold text-xl mr-3">✕</span>
+                                <div>
+                                    <h4 class="font-semibold text-slate-700">Diuretics</h4>
+                                    <p class="text-sm text-slate-500">Largely ineffective for malignant ascites (unlike cirrhotic ascites).</p>
+                                </div>
+                            </li>
+                            <li class="flex items-start">
+                                <span class="text-red-500 font-bold text-xl mr-3">✕</span>
+                                <div>
+                                    <h4 class="font-semibold text-slate-700">IP Chemotherapy (HIPEC)</h4>
+                                    <p class="text-sm text-slate-500">Highly invasive, significant toxicity, and suitable for few patients.</p>
+                                </div>
+                            </li>
+                            <li class="flex items-start mt-4 pt-4 border-t">
+                                <span class="text-green-600 font-bold text-xl mr-3">🎯</span>
+                                <div>
+                                    <h4 class="font-semibold text-slate-700">The Clinical Gap</h4>
+                                    <p class="text-sm text-slate-500">No approved, minimally invasive therapy exists that provides durable fluid control *and* exerts a local anti-tumor effect.</p>
+                                </div>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+            </section>
+
+            <section id="section-moa" class="content-section space-y-8">
+                <header class="pb-4 border-b border-slate-200">
+                    <h2 class="text-3xl font-bold text-sky-800">Mechanism of Action</h2>
+                    <p class="mt-2 text-lg text-slate-600">A trifunctional, tri-cell complex approach to immune engagement.</p>
+                </header>
+                
+                <div class="bg-white p-6 rounded-lg shadow overflow-x-auto">
+                    <h3 class="text-2xl font-semibold text-slate-800 mb-2">The Trifunctional Antibody</h3>
+                    <p class="text-slate-600 mb-6">Catumaxomab is a murine/rat chimeric antibody (Triomab® platform) that physically links three distinct cells to orchestrate a potent, localized immune attack.</p>
+                    
+                    <div class="moa-diagram bg-slate-50 rounded-lg relative overflow-hidden">
+                        <div class="moa-cell moa-cell-tumor">
+                            Tumor Cell
+                            <span class="block text-sm font-normal mt-1">(EpCAM+)</span>
+                        </div>
+                        
+                        <div class="moa-cell moa-cell-tcell">
+                            T-Cell
+                            <span class="block text-sm font-normal mt-1">(CD3+)</span>
+                        </div>
+                        
+                        <div class="moa-cell moa-cell-accessory">
+                            Accessory Cell
+                            <span class="block text-sm font-normal mt-1">(Macrophage, NK Cell)</span>
+                            <span class="block text-sm font-normal mt-1">(FcγR+)</span>
+                        </div>
+                        
+                        <div class="moa-antibody">
+                            <div class="moa-antibody-core">
+                                <span>Korjuny</span>
+                            </div>
+                            <div class="moa-line line-tumor"></div>
+                            <div class="moa-line line-tcell"></div>
+                            <div class="moa-line line-accessory"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-white p-6 rounded-lg shadow">
+                    <h3 class="text-2xl font-semibold text-slate-800 mb-4">The Tri-Cell Synapse: A Dual-Pronged Attack</h3>
+                    <p class="text-slate-600 mb-6">This "tri-cell complex" results in a potent, dual-pronged attack by activating both adaptive and innate immune cells.</p>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div class="bg-blue-50 p-4 rounded-lg border border-blue-200">
+                            <h4 class="font-bold text-lg text-blue-700">1. T-Cell Activation (Adaptive)</h4>
+                            <p class="text-slate-600 mt-2">CD3 binding activates T-cells *without* requiring co-stimulation, leading to direct, perforin/granzyme-mediated tumor cell lysis.</p>
+                            <div class="mt-3 text-sm font-medium text-blue-800">Result: Direct Tumor Lysis</div>
+                        </div>
+                        <div class="bg-green-50 p-4 rounded-lg border border-green-200">
+                            <h4 class="font-bold text-lg text-green-700">2. Accessory Cell Activation (Innate)</h4>
+                            <p class="text-slate-600 mt-2">The functional Fc region binds Fcγ receptors, activating macrophages and NK cells. This leads to Antibody-Dependent Cellular Cytotoxicity (ADCC) and Phagocytosis (ADCP).</p>
+                            <div class="mt-3 text-sm font-medium text-green-800">Result: ADCC & Phagocytosis</div>
+                        </div>
+                    </div>
+                    <div class="mt-6 p-4 bg-sky-50 rounded-lg text-center">
+                        <h4 class="text-xl font-bold text-sky-800">Final Outcome: A localized, highly potent immune response that eliminates tumor cells and reduces fluid production.</h4>
+                    </div>
+                </div>
+            </section>
+
+            <section id="section-study" class="content-section space-y-8">
+                <header class="pb-4 border-b border-slate-200">
+                    <h2 class="text-3xl font-bold text-sky-800">Pivotal Study: IP-REM-AC-01</h2>
+                    <p class="mt-2 text-lg text-slate-600">Study design and demographics for the pivotal Phase II/III trial.</p>
+                </header>
+
+                <div class="bg-white p-6 rounded-lg shadow">
+                    <h3 class="text-2xl font-semibold text-slate-800 mb-4">Study Design</h3>
+                    <ul class="space-y-3 list-disc list-inside text-slate-600">
+                        <li><span class="font-semibold text-slate-700">Name:</span> IP-REM-AC-01</li>
+                        <li><span class="font-semibold text-slate-700">Design:</span> Randomized, open-label, two-arm, multicenter pivotal study.</li>
+                        <li><span class="font-semibold text-slate-700">Population (N=258):</span> Patients with symptomatic MA secondary to EpCAM-positive carcinoma.</li>
+                        <li><span class="font-semibold text-slate-700">Primary Endpoint:</span> Puncture-Free Survival (PuFS).</li>
+                        <li><span class="font-semibold text-slate-700">Secondary Endpoints:</span> Time to Next Puncture (TTPu), Overall Survival (OS), PROs.</li>
+                    </ul>
+                    
+                    <div class="my-6 space-y-4">
+                        <div class="flex flex-col md:flex-row items-center justify-center gap-4 text-center">
+                            <div class="p-4 border border-slate-200 rounded-lg bg-slate-50 w-full md:w-2/5">
+                                <h4 class="font-bold text-sky-700">Arm 1 (N=129)</h4>
+                                <p class="text-slate-600">Catumaxomab (IP infusion) + Standard of Care (paracentesis as needed)</p>
+                            </div>
+                            <span class="font-bold text-xl text-slate-500">vs.</span>
+                            <div class="p-4 border border-slate-200 rounded-lg bg-slate-50 w-full md:w-2/5">
+                                <h4 class="font-bold text-sky-700">Arm 2 (N=129)</h4>
+                                <p class="text-slate-600">Standard of Care (paracentesis as needed) alone</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-white p-6 rounded-lg shadow">
+                    <h3 class="text-2xl font-semibold text-slate-800 mb-4">Baseline Demographics</h3>
+                    <p class="text-slate-600 mb-4">Patient characteristics were well-balanced between the two arms.</p>
+                    <ul class="space-y-3 list-disc list-inside text-slate-600">
+                        <li><span class="font-semibold text-slate-700">Median Age:</span> ~58 years</li>
+                        <li><span class="font-semibold text-slate-700">ECOG PS:</span> 1-2 (Reflecting significant disease burden)</li>
+                        <li><span class="font-semibold text-slate-700">Primary Tumor Types:</span>
+                            <ul class="pl-6 space-y-1 mt-1">
+                                <li>Ovarian (~55%)</li>
+                                <li>Gastric (~25%)</li>
+                                <li>Other (Pancreatic, CRC, Breast)</li>
+                            </ul>
+                        </li>
+                    </ul>
+                </div>
+            </section>
+
+            <section id="section-efficacy" class="content-section space-y-8">
+                <header class="pb-4 border-b border-slate-200">
+                    <h2 class="text-3xl font-bold text-sky-800">Pivotal Efficacy Results</h2>
+                    <p class="mt-2 text-lg text-slate-600">Analysis of primary and key secondary endpoints from the IP-REM-AC-01 study.</p>
+                </header>
+
+                <div class="bg-white p-6 rounded-lg shadow">
+                    <h3 class="text-2xl font-semibold text-slate-800 mb-2">Primary Endpoint: Puncture-Free Survival (PuFS)</h3>
+                    <p class="text-slate-600 mb-4">PuFS was defined as the time from first infusion to the first required therapeutic puncture or death.</p>
+                    
+                    <div class="text-center my-6">
+                        <div class="inline-block bg-sky-50 rounded-lg p-6">
+                            <div class="text-lg font-semibold text-sky-700">Median PuFS</div>
+                            <div class="flex items-baseline justify-center space-x-6 mt-2">
+                                <div>
+                                    <div class="text-5xl font-bold text-sky-800">46</div>
+                                    <div class="text-sm text-slate-600">Catumaxomab</div>
+                                </div>
+                                <div class="text-2xl text-slate-500">vs</div>
+                                <div>
+                                    <div class="text-5xl font-bold text-slate-700">11</div>
+                                    <div class="text-sm text-slate-600">Control</div>
+                                </div>
+                            </div>
+                            <div class="mt-4 text-sm font-semibold text-slate-700">(HR = 0.254; 95% CI: 0.186–0.347; p &lt; 0.0001)</div>
+                            <div class="mt-1 text-sm text-green-700 font-medium">~75% reduction in risk of puncture or death</div>
+                        </div>
+                    </div>
+
+                    <div class="chart-container">
+                        <canvas id="puFsChart"></canvas>
+                    </div>
+                </div>
+
+                <div class="bg-white p-6 rounded-lg shadow">
+                    <h3 class="text-2xl font-semibold text-slate-800 mb-2">Key Secondary Endpoint: Time to Next Puncture (TTPu)</h3>
+                    <p class="text-slate-600 mb-4">The benefit was reinforced by TTPu, along with a positive trend in Overall Survival (OS), especially in the gastric cancer subgroup (HR = 0.53).</p>
+                    
+                    <div class="text-center my-6">
+                        <div class="inline-block bg-slate-50 rounded-lg p-6">
+                            <div class="text-lg font-semibold text-slate-700">Median Time to Next Puncture (TTPu)</div>
+                            <div class="flex items-baseline justify-center space-x-6 mt-2">
+                                <div>
+                                    <div class="text-5xl font-bold text-sky-800">77</div>
+                                    <div class="text-sm text-slate-600">Catumaxomab</div>
+                                </div>
+                                <div class="text-2xl text-slate-500">vs</div>
+                                <div>
+                                    <div class="text-5xl font-bold text-slate-700">13</div>
+                                    <div class="text-sm text-slate-600">Control</div>
+                                </div>
+                            </div>
+                            <div class="mt-4 text-sm font-semibold text-slate-700">(HR = 0.179; p &lt; 0.0001)</div>
+                        </div>
+                    </div>
+                    
+                    <div class="chart-container" style="height: 300px; max-height: 350px;">
+                        <canvas id="ttpuChart"></canvas>
+                    </div>
+                </div>
+            </section>
+            
+            <section id="section-safety" class="content-section space-y-8">
+                <header class="pb-4 border-b border-slate-200">
+                    <h2 class="text-3xl font-bold text-sky-800">Safety & Tolerability</h2>
+                    <p class="mt-2 text-lg text-slate-600">A comprehensive review of the safety profile and management of on-target AEs.</p>
+                </header>
+
+                <div class="border-b border-slate-200">
+                    <nav class="flex -mb-px space-x-6" aria-label="Tabs">
+                        <button class="tab-link active whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm" data-tab="safety-profile">Safety Profile</button>
+                        <button class="tab-link whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm text-slate-500 hover:text-slate-700" data-tab="safety-management">Proactive Management</button>
+                    </nav>
+                </div>
+
+                <div id="tab-safety-profile" class="tab-content active">
+                    <div class="bg-white p-6 rounded-lg shadow space-y-6">
+                        <h3 class="text-2xl font-semibold text-slate-800">Predictable, Mechanism-Based AEs</h3>
+                        <p class="text-slate-600">The majority of Adverse Events (AEs) are on-target, related to immune activation (e.g., Cytokine Release Syndrome). Most AEs occurred during or shortly after the first two infusions and were transient and reversible.</p>
+                        
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div>
+                                <h4 class="font-semibold text-lg text-slate-700 mb-2">Most Common AEs (All Grades)</h4>
+                                <ul class="space-y-1 list-disc list-inside text-slate-600">
+                                    <li>Pyrexia (fever)</li>
+                                    <li>Nausea & Vomiting</li>
+                                    <li>Abdominal Pain</li>
+                                    <li>Chills</li>
+                                </ul>
+                            </div>
+                            <div>
+                                <h4 class="font-semibold text-lg text-slate-700 mb-2">Most Common Grade ≥3 AEs</h4>
+                                <ul class="space-y-1 list-disc list-inside text-slate-600">
+                                    <li>Lymphopenia</li>
+                                    <li>Abdominal Pain</li>
+                                    <li>Pyrexia</li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="tab-safety-management" class="tab-content">
+                    <div class="bg-white p-6 rounded-lg shadow space-y-6">
+                        <h3 class="text-2xl font-semibold text-slate-800">Managing Cytokine Release Syndrome (CRS)</h3>
+                        <p class="text-slate-600">CRS is an expected, on-target effect. The dose-escalation regimen (10, 20, 50, 150 µg) is specifically designed to "prime" the immune system and mitigate CRS severity.</p>
+
+                        <div>
+                            <h4 class="font-semibold text-lg text-red-700 mb-3">Mandatory Prophylaxis Protocol</h4>
+                            <p class="text-slate-600 mb-4">Pre-medication is essential 30-60 minutes before *each* infusion:</p>
+                            <ul class="space-y-2">
+                                <li class="flex items-center"><span class="flex h-8 w-8 items-center justify-center rounded-full bg-red-100 text-red-700 font-bold mr-3">1</span>Corticosteroids (e.g., dexamethasone)</li>
+                                <li class="flex items-center"><span class="flex h-8 w-8 items-center justify-center rounded-full bg-red-100 text-red-700 font-bold mr-3">2</span>Antipyretics (e.g., paracetamol)</li>
+                                <li class="flex items-center"><span class="flex h-8 w-8 items-center justify-center rounded-full bg-red-100 text-red-700 font-bold mr-3">3</span>Antihistamines (e.g., diphenhydramine)</li>
+                            </ul>
+                        </div>
+                        
+                        <div>
+                            <h4 class="font-semibold text-lg text-sky-700 mb-3">Management Strategy</h4>
+                            <p class="text-slate-600">AEs are generally transient and managed with standard supportive care. This is an immuno-oncology profile, not a chemotherapy profile, and is well-controlled with this protocol.</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+            
+            <section id="section-immunogenicity" class="content-section space-y-8">
+                <header class="pb-4 border-b border-slate-200">
+                    <h2 class="text-3xl font-bold text-sky-800">Immunogenicity: A Positive Prognostic Indicator</h2>
+                    <p class="mt-2 text-lg text-slate-600">A counter-intuitive finding on Anti-Drug Antibodies (ADAs).</p>
+                </header>
+
+                <div class="bg-white p-6 rounded-lg shadow">
+                    <h3 class="text-2xl font-semibold text-slate-800 mb-4">The ADA Finding</h3>
+                    <ul class="space-y-3 list-disc list-inside text-slate-600">
+                        <li>As a murine/rat chimeric protein, catumaxomab is immunogenic (~80% of patients developed ADAs).</li>
+                        <li><span class="font-semibold text-slate-700">Crucial Finding:</span> ADA development was **NOT** associated with reduced efficacy or worse safety.</li>
+                        <li><span class="font-semibold text-green-700">Positive Correlation:</span> Patients who developed ADAs had a **significantly better Overall Survival** compared to those who did not.</li>
+                        <li><span class="font-semibold text-slate-700">Hypothesis:</span> ADA formation is a surrogate marker for a robust, global immune response, which is prognostically favorable.</li>
+                    </ul>
+                </div>
+                
+                <div class="bg-white p-6 rounded-lg shadow">
+                    <h3 class="text-2xl font-semibold text-slate-800 mb-4 text-center">Overall Survival by ADA Status</h3>
+                    <div class="chart-container">
+                        <canvas id="adaOsChart"></canvas>
+                    </div>
+                </div>
+            </section>
+
+            <section id="section-application" class="content-section space-y-8">
+                <header class="pb-4 border-b border-slate-200">
+                    <h2 class="text-3xl font-bold text-sky-800">Practical Clinical Application</h2>
+                    <p class="mt-2 text-lg text-slate-600">Guidance on patient selection, dosing, administration, and monitoring.</p>
+                </header>
+                
+                <div class="border-b border-slate-200">
+                    <nav class="flex flex-wrap -mb-px space-x-6" aria-label="Tabs">
+                        <button class="tab-link active whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm" data-tab="app-patient">Patient Profile</button>
+                        <button class="tab-link whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm text-slate-500 hover:text-slate-700" data-tab="app-dosing">Dosing & Admin</button>
+                        <button class="tab-link whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm text-slate-500 hover:text-slate-700" data-tab="app-monitoring">Monitoring</button>
+                    </nav>
+                </div>
+
+                <div id="tab-app-patient" class="tab-content active">
+                    <div class="bg-white p-6 rounded-lg shadow">
+                        <h3 class="text-2xl font-semibold text-slate-800 mb-4">The Ideal Patient for Catumaxomab</h3>
+                        <p class="text-slate-600 mb-6">Proper patient selection is a key to success.</p>
+                        <ul class="space-y-4">
+                            <li class="flex items-start p-4 bg-green-50 rounded-lg border border-green-200">
+                                <span class="text-2xl mr-3">✅</span>
+                                <div>
+                                    <h4 class="font-semibold text-green-800">Confirmed EpCAM+ Carcinoma</h4>
+                                    <p class="text-sm text-slate-600">(Ovarian, Gastric, Pancreatic, CRC, Breast)</p>
+                                </div>
+                            </li>
+                            <li class="flex items-start p-4 bg-green-50 rounded-lg border border-green-200">
+                                <span class="text-2xl mr-3">✅</span>
+                                <div>
+                                    <h4 class="font-semibold text-green-800">Symptomatic Ascites</h4>
+                                    <p class="text-sm text-slate-600">Requiring, or with a history of, therapeutic paracentesis.</p>
+                                </div>
+                            </li>
+                            <li class="flex items-start p-4 bg-green-50 rounded-lg border border-green-200">
+                                <span class="text-2xl mr-3">✅</span>
+                                <div>
+                                    <h4 class="font-semibold text-green-800">Adequate Performance Status</h4>
+                                    <p class="text-sm text-slate-600">(ECOG PS 0-2)</p>
+                                </div>
+                            </li>
+                        </ul>
+                        <div class="mt-6 p-4 bg-yellow-50 rounded-lg border border-yellow-200">
+                            <h4 class="font-semibold text-yellow-800">Clinical Setting Requirement</h4>
+                            <p class="text-slate-600 mt-2">Must be administered in a setting with full monitoring and resuscitation capabilities (e.g., infusion center, inpatient ward). Requires coordination between Oncology, IR, and Infusion Nursing.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="tab-app-dosing" class="tab-content">
+                    <div class="bg-white p-6 rounded-lg shadow">
+                        <h3 class="text-2xl font-semibold text-slate-800 mb-6">Dosing, Preparation & Administration</h3>
+                        
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+                            <div>
+                                <h4 class="font-semibold text-lg text-slate-700 mb-2">Preparation & Infusion</h4>
+                                <ul class="space-y-2 list-disc list-inside text-slate-600">
+                                    <li><span class="font-semibold">Route:</span> Intraperitoneal (IP) via catheter</li>
+                                    <li><span class="font-semibold">Preparation:</span> Dilute in 50 mL 0.9% NaCl</li>
+                                    <li><span class="font-semibold">Infusion:</span> 3-hour IP infusion</li>
+                                    <li><span class="font-semibold text-red-600">Pre-medication:</span> Mandatory 30-60 min prior</li>
+                                </ul>
+                            </div>
+                            <div>
+                                <h4 class="font-semibold text-lg text-slate-700 mb-2">Regimen: A Single 10-Day Course</h4>
+                                <p class="text-slate-600">Four infusions with escalating doses to mitigate CRS.</p>
+                            </div>
+                        </div>
+
+                        <div class="timeline">
+                            <div class="timeline-item">
+                                <div class="timeline-dot">D0</div>
+                                <div class="timeline-content">
+                                    <h5 class="font-bold text-lg text-sky-800">Infusion 1: 10 µg</h5>
+                                    <p class="text-sm text-slate-600">Day 0. Pre-medication required.</p>
+                                </div>
+                            </div>
+                            <div class="timeline-item">
+                                <div class="timeline-dot">D3</div>
+                                <div class="timeline-content">
+                                    <h5 class="font-bold text-lg text-sky-800">Infusion 2: 20 µg</h5>
+                                    <p class="text-sm text-slate-600">Day 3. Pre-medication required.</p>
+                                </div>
+                            </div>
+                            <div class="timeline-item">
+                                <div class="timeline-dot">D7</div>
+                                <div class="timeline-content">
+                                    <h5 class="font-bold text-lg text-sky-800">Infusion 3: 50 µg</h5>
+                                    <p class="text-sm text-slate-600">Day 7. Pre-medication required.</p>
+                                </div>
+                            </div>
+                            <div class="timeline-item">
+                                <div class="timeline-dot">D10</div>
+                                <div class="timeline-content">
+                                    <h5 class="font-bold text-lg text-sky-800">Infusion 4: 150 µg</h5>
+                                    <p class="text-sm text-slate-600">Day 10. Pre-medication required.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="tab-app-monitoring" class="tab-content">
+                    <div class="bg-white p-6 rounded-lg shadow">
+                        <h3 class="text-2xl font-semibold text-slate-800 mb-6">Essential Monitoring Protocol</h3>
+                        <p class="text-slate-600 mb-6">Vigilant monitoring, especially during and after the first two infusions, is the cornerstone of safe management.</p>
+                        <ul class="space-y-4">
+                            <li class="flex items-start">
+                                <span class="text-3xl mr-4">🩺</span>
+                                <div>
+                                    <h4 class="font-semibold text-lg text-slate-700">Vital Signs</h4>
+                                    <p class="text-slate-600">Monitor BP, HR, Temp, O2 Sat:
+                                        <br>- Before infusion
+                                        <br>- Every 30-60 min during infusion
+                                        <br>- For at least 6 hours post-infusion (esp. Infusions 1 & 2)
+                                    </p>
+                                </div>
+                            </li>
+                            <li class="flex items-start">
+                                <span class="text-3xl mr-4">🤒</span>
+                                <div>
+                                    <h4 class="font-semibold text-lg text-slate-700">CRS Symptoms</h4>
+                                    <p class="text-slate-600">Observe closely for fever, chills, nausea, abdominal pain, tachycardia, or hypotension.</p>
+                                </div>
+                            </li>
+                            <li class="flex items-start">
+                                <span class="text-3xl mr-4">🩸</span>
+                                <div>
+                                    <h4 class="font-semibold text-lg text-slate-700">Laboratory</h4>
+                                    <p class="text-slate-600">Monitor CBC with differential (for transient lymphopenia) and LFTs at baseline and as clinically indicated.</p>
+                                </div>
+                            </li>
+                            <li class="flex items-start">
+                                <span class="text-3xl mr-4">📋</span>
+                                <div>
+                                    <h4 class="font-semibold text-lg text-slate-700">Fluid Status</h4>
+                                    <p class="text-slate-600">Assess for symptoms of ascites and potential catheter-related complications.</p>
+                                </div>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+            </section>
+            
+            <section id="section-conclusion" class="content-section space-y-8">
+                <header class="pb-4 border-b border-slate-200">
+                    <h2 class="text-3xl font-bold text-sky-800">Concluding Expert Analysis</h2>
+                    <p class="mt-2 text-lg text-slate-600">A paradigm shift in the management of malignant ascites.</p>
+                </header>
+
+                <div class="bg-white p-6 rounded-lg shadow space-y-6">
+                    <h3 class="text-2xl font-semibold text-slate-800 mb-4">Key Takeaways</h3>
+                    
+                    <div class="p-4 bg-sky-50 rounded-lg border border-sky-200">
+                        <h4 class="font-bold text-lg text-sky-700">1. A New Mechanism, Not Palliative</h4>
+                        <p class="text-slate-600 mt-1">Catumaxomab is an active, targeted immuno-oncology agent that leverages a unique trifunctional MoA to engage both T-cells and macrophages.</p>
+                    </div>
+
+                    <div class="p-4 bg-green-50 rounded-lg border border-green-200">
+                        <h4 class="font-bold text-lg text-green-700">2. Unprecedented Efficacy</h4>
+                        <p class="text-slate-600 mt-1">The IP-REM-AC-01 study demonstrates a clinically unprecedented and statistically robust benefit in Puncture-Free Survival (46 vs. 11 days; HR 0.254).</p>
+                    </div>
+                    
+                    <div class="p-4 bg-purple-50 rounded-lg border border-purple-200">
+                        <h4 class="font-bold text-lg text-purple-700">3. Manageable Safety Profile</h4>
+                        <p class="text-slate-600 mt-1">The safety profile (CRS-related) is predictable, on-target, and manageable with prophylaxis, dose escalation, and supportive care.</p>
+                    </div>
+
+                    <div class="mt-8 text-center">
+                        <p class="text-xl font-semibold text-slate-800">Catumaxomab represents a new, non-surgical standard of care for patients with EpCAM-positive malignant ascites.</p>
+                        <p class="text-lg text-slate-600 mt-2">For the first time, we can offer patients more than a palliative drain; we can offer an active, immune-engaging therapy that fundamentally alters the disease course in the peritoneum.</p>
+                    </div>
+                </div>
+            </section>
+
+        </main>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const navItems = [
+                { id: 'overview', title: 'Overview' },
+                { id: 'problem', title: 'The Clinical Problem' },
+                { id: 'moa', title: 'Mechanism of Action' },
+                { id: 'study', title: 'Pivotal Study Design' },
+                { id: 'efficacy', title: 'Efficacy Results' },
+                { id: 'safety', title: 'Safety & Tolerability' },
+                { id: 'immunogenicity', title: 'Immunogenicity' },
+                { id: 'application', title: 'Clinical Application' },
+                { id: 'conclusion', title: 'Conclusion & Analysis' }
+            ];
+            
+            const desktopNav = document.getElementById('desktop-nav-list');
+            const mobileNav = document.getElementById('mobile-menu');
+            const mobileNavList = mobileNav ? mobileNav.querySelector('ul') : null;
+            const mobileMenuBtn = document.getElementById('mobile-menu-btn');
+
+            // build nav only when containers exist
+            if (desktopNav || mobileNavList) {
+                navItems.forEach(item => {
+                    if (desktopNav) {
+                        const li = document.createElement('li');
+                        li.innerHTML = `<a href="#" class="nav-link block rounded-md py-2 px-3 text-sm font-medium text-slate-700" data-target="section-${item.id}">${item.title}</a>`;
+                        desktopNav.appendChild(li);
+                    }
+
+                    if (mobileNavList) {
+                        const liMobile = document.createElement('li');
+                        liMobile.innerHTML = `<a href="#" class="nav-link block rounded-md py-2 px-3 text-base font-medium text-slate-700" data-target="section-${item.id}">${item.title}</a>`;
+                        mobileNavList.appendChild(liMobile);
+                    }
+                });
+            }
+
+            const navLinks = document.querySelectorAll('.nav-link');
+            const contentSections = document.querySelectorAll('.content-section');
+
+            function updateActiveNav(targetId) {
+                if (!targetId) return;
+                navLinks.forEach(link => {
+                    if (link.dataset.target === targetId) {
+                        link.classList.add('active');
+                    } else {
+                        link.classList.remove('active');
+                    }
+                });
+
+                contentSections.forEach(section => {
+                    if (section.id === targetId) {
+                        section.classList.add('active');
+                    } else {
+                        section.classList.remove('active');
+                    }
+                });
+            }
+
+            if (navLinks && navLinks.length) {
+                navLinks.forEach(link => {
+                    link.addEventListener('click', (e) => {
+                        e.preventDefault();
+                        const targetId = e.currentTarget && e.currentTarget.dataset ? e.currentTarget.dataset.target : null;
+                        if (targetId) {
+                            updateActiveNav(targetId);
+                            window.scrollTo(0, 0);
+                        }
+                        if (mobileNav) mobileNav.classList.add('hidden');
+                    });
+                });
+            }
+
+            if (mobileMenuBtn) {
+                mobileMenuBtn.addEventListener('click', () => {
+                    if (mobileNav) mobileNav.classList.toggle('hidden');
+                });
+            }
+
+            const tabContainers = document.querySelectorAll('.content-section');
+            if (tabContainers && tabContainers.length) {
+                tabContainers.forEach(container => {
+                    const tabLinks = container.querySelectorAll('.tab-link');
+                    const tabContents = container.querySelectorAll('.tab-content');
+
+                    if (!tabLinks || !tabLinks.length) return;
+
+                    tabLinks.forEach(link => {
+                        link.addEventListener('click', (e) => {
+                            e.preventDefault();
+                            const targetId = e.currentTarget && e.currentTarget.dataset ? e.currentTarget.dataset.tab : null;
+                            if (!targetId) return;
+                            
+                            tabLinks.forEach(l => {
+                                l.classList.remove('active', 'text-slate-700');
+                                l.classList.add('text-slate-500', 'hover:text-slate-700');
+                            });
+                            e.currentTarget.classList.add('active', 'text-slate-700');
+                            e.currentTarget.classList.remove('text-slate-500', 'hover:text-slate-700');
+
+                            if (tabContents && tabContents.length) {
+                                tabContents.forEach(content => {
+                                    if (content.id === `tab-${targetId}`) {
+                                        content.classList.add('active');
+                                    } else {
+                                        content.classList.remove('active');
+                                    }
+                                });
+                            }
+                        });
+                    });
+                });
+            }
+
+            // ensure the default exists before trying to activate
+            if (document.getElementById('section-overview')) {
+                updateActiveNav('section-overview');
+            }
+
+            // Full-site (force-desktop) toggle for mobile/webviews
+            const viewFullBtn = document.getElementById('view-full-btn');
+            const bodyEl = document.body;
+            const mainAside = document.getElementById('main-aside');
+
+            function applySavedFullMode() {
+                try {
+                    const saved = localStorage.getItem('viewFullSite');
+                    if (saved === '1') {
+                        bodyEl.classList.add('force-desktop');
+                    }
+                } catch (err) {
+                    // ignore
+                }
+            }
+
+            if (viewFullBtn) {
+                viewFullBtn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    const enabled = bodyEl.classList.toggle('force-desktop');
+                    try {
+                        localStorage.setItem('viewFullSite', enabled ? '1' : '0');
+                    } catch (err) {
+                        // ignore storage errors
+                    }
+                    // if forcing desktop, ensure aside is visible
+                    if (enabled && mainAside) {
+                        mainAside.classList.add('force-desktop-shown');
+                    } else if (mainAside) {
+                        mainAside.classList.remove('force-desktop-shown');
+                    }
+                    // some mobile webviews need a small delay to reflow
+                    setTimeout(() => window.scrollTo(0, 0), 120);
+                });
+            }
+            applySavedFullMode();
+
+            // chart initialization (kept same but guarded)
+            const commonChartOptions = {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { position: 'bottom' },
+                    tooltip: { mode: 'index', intersect: false }
+                },
+                scales: {
+                    x: { title: { display: true, font: { weight: 'bold' } }, grid: { display: false } },
+                    y: { title: { display: true, font: { weight: 'bold' } }, min: 0 }
+                }
+            };
+
+            try {
+                if (document.getElementById('puFsChart')) {
+                    const ctxPuFs = document.getElementById('puFsChart').getContext('2d');
+                    new Chart(ctxPuFs, {
+                        type: 'line',
+                        data: {
+                            labels: ['0', '10', '20', '30', '40', '50', '60', '70', '80', '90', '100+'],
+                            datasets: [
+                                {
+                                    label: 'Catumaxomab (Median: 46 days)',
+                                    data: [100, 95, 80, 70, 60, 50, 45, 42, 40, 38, 35],
+                                    borderColor: '#0284c7',
+                                    backgroundColor: 'rgba(2, 132, 199, 0.1)',
+                                    fill: true,
+                                    tension: 0.1,
+                                    borderWidth: 3,
+                                },
+                                {
+                                    label: 'Control (Median: 11 days)',
+                                    data: [100, 50, 25, 18, 15, 12, 10, 8, 7, 6, 5],
+                                    borderColor: '#64748b',
+                                    backgroundColor: 'rgba(100, 116, 139, 0.1)',
+                                    fill: true,
+                                    tension: 0.1,
+                                    borderWidth: 3,
+                                    borderDash: [5, 5]
+                                }
+                            ]
+                        },
+                        options: {
+                            ...commonChartOptions,
+                            scales: {
+                                ...commonChartOptions.scales,
+                                x: {
+                                    ...commonChartOptions.scales.x,
+                                    title: { ...commonChartOptions.scales.x.title, text: 'Time (Days)' }
+                                },
+                                y: {
+                                    ...commonChartOptions.scales.y,
+                                    max: 100,
+                                    title: { ...commonChartOptions.scales.y.title, text: 'Puncture-Free Survival (%)' }
+                                }
+                            }
+                        }
+                    });
+                }
+
+                if (document.getElementById('ttpuChart')) {
+                    const ctxTTPu = document.getElementById('ttpuChart').getContext('2d');
+                    new Chart(ctxTTPu, {
+                        type: 'bar',
+                        data: {
+                            labels: ['Median Time to Next Puncture (TTPu)'],
+                            datasets: [
+                                {
+                                    label: 'Catumaxomab',
+                                    data: [77],
+                                    backgroundColor: '#0284c7',
+                                    barPercentage: 0.5,
+                                },
+                                {
+                                    label: 'Control',
+                                    data: [13],
+                                    backgroundColor: '#64748b',
+                                    barPercentage: 0.5,
+                                }
+                            ]
+                        },
+                        options: {
+                            ...commonChartOptions,
+                            plugins: {
+                                ...commonChartOptions.plugins,
+                                tooltip: {
+                                    callbacks: {
+                                        label: function(context) {
+                                            return `${context.dataset.label}: ${context.parsed.y} days`;
+                                        }
+                                    }
+                                }
+                            },
+                            scales: {
+                                x: {
+                                    grid: { display: false }
+                                },
+                                y: {
+                                    ...commonChartOptions.scales.y,
+                                    title: { ...commonChartOptions.scales.y.title, text: 'Days' }
+                                }
+                            }
+                        }
+                    });
+                }
+
+                if (document.getElementById('adaOsChart')) {
+                    const ctxAdaOs = document.getElementById('adaOsChart').getContext('2d');
+                    new Chart(ctxAdaOs, {
+                        type: 'line',
+                        data: {
+                            labels: ['0', '2', '4', '6', '8', '10', '12+'],
+                            datasets: [
+                                {
+                                    label: 'ADA-Positive',
+                                    data: [100, 90, 80, 75, 70, 68, 65],
+                                    borderColor: '#16a34a',
+                                    backgroundColor: 'rgba(22, 163, 74, 0.1)',
+                                    fill: true,
+                                    tension: 0.1,
+                                    borderWidth: 3,
+                                },
+                                {
+                                    label: 'ADA-Negative',
+                                    data: [100, 85, 70, 55, 45, 40, 38],
+                                    borderColor: '#ef4444',
+                                    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                                    fill: true,
+                                    tension: 0.1,
+                                    borderWidth: 3,
+                                    borderDash: [5, 5]
+                                }
+                            ]
+                        },
+                        options: {
+                            ...commonChartOptions,
+                            scales: {
+                                ...commonChartOptions.scales,
+                                x: {
+                                    ...commonChartOptions.scales.x,
+                                    title: { ...commonChartOptions.scales.x.title, text: 'Time (Months)' }
+                                },
+                                y: {
+                                    ...commonChartOptions.scales.y,
+                                    max: 100,
+                                    title: { ...commonChartOptions.scales.y.title, text: 'Overall Survival (%)' }
+                                }
+                            }
+                        }
+                    });
+                }
+            } catch (chartErr) {
+                console.error('Chart init error:', chartErr);
+            }
+        });
+    </script>
+</body>
+</html>
